@@ -1,0 +1,26 @@
+{
+  "name": "sql_memory",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Persistent notebook MCP — SQLite + FTS5. Four tools: remember, recall, list_memories, forget.",
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc -p ."
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "better-sqlite3": "^11.5.0",
+    "dotenv": "^16.4.5",
+    "envalid": "^8.0.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=22.14"
+  }
+}
