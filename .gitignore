@@ -1,24 +1,16 @@
-# Dependencies
+.vscode/
+
 node_modules/
 
-# Build output
 dist/
 *.tsbuildinfo
 
-# Secrets / local env
 .env
 .env.local
 
-# Runtime data — the MCP's auto-created data folder (DB + agent .md files)
-sql_memory/
+data/
 
-# OS junk
+*.log
 .DS_Store
 Thumbs.db
 
-# Editor
-.vscode/
-.idea/
-
-# Logs
-*.log

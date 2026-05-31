@@ -13,28 +13,28 @@ export const config = cleanEnv(process.env, {
     devDefault: "development",
   }),
 
-  SQL_MEMORY_PATH: str({ default: "data", devDefault: "data" }),
+  MEMORA_PATH: str({ default: "" }),
 
-  AGENT_NAME: str({ default: "" }),
-  AGENT_MEMORY_PATH: str({ default: "" }),
+  AGENT_NAME: str({ default: "default", devDefault: "default" }),
+  AGENT_MEMORA_PATH: str({ default: "" }),
 });
 
-const sqlMemoryPath = resolve(rootPath, config.SQL_MEMORY_PATH);
+const basePath = config.MEMORA_PATH
+  ? resolve(rootPath, `${config.MEMORA_PATH}/memora`)
+  : resolve(rootPath, "data");
 
-const globalMemoryPath = resolve(sqlMemoryPath, "global");
+const globalMemPath = resolve(basePath, "global");
 
-const agent = config.AGENT_NAME || "default";
-const agentBasePath = config.AGENT_MEMORY_PATH
-  ? resolve(rootPath, config.AGENT_MEMORY_PATH)
-  : resolve(sqlMemoryPath, "agents");
-const agentMemoryPath = resolve(agentBasePath, agent);
+const agentMemPath = config.AGENT_MEMORA_PATH
+  ? resolve(rootPath, `${config.AGENT_MEMORA_PATH}/${config.AGENT_NAME}`)
+  : resolve(basePath, `agents/${config.AGENT_NAME}`);
 
-const databasePath = resolve(sqlMemoryPath, `memory.db`);
+const databasePath = resolve(basePath, `memory.db`);
 const databaseSchemaPath = resolve(rootPath, `src/database/schema.sql`);
 
 export const paths = {
-  globalMem: globalMemoryPath,
-  agentMem: agentMemoryPath,
+  globalMem: globalMemPath,
+  agentMem: agentMemPath,
   database: databasePath,
   databaseSchema: databaseSchemaPath,
 };

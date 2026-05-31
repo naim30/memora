@@ -6,15 +6,34 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { paths } from "./config/config.js";
 import { database } from "./database/db.js";
 import { registerTool } from "./lib/register-tool.js";
-import { MemoryCreate, MemoryDelete, MemoryList, MemorySearch } from "./tools/index.js";
+import {
+  KnowledgeRead,
+  KnowledgeWrite,
+  MemoryCreate,
+  MemoryDelete,
+  MemoryList,
+  MemorySearch,
+} from "./tools/index.js";
 
-// Ensure the per-agent memory folder exists (for procedural + semantic
-// .md files — manipulated by future tools). The DB's parent folder is
-// created by db.ts on startup.
+mkdirSync(paths.globalMem, { recursive: true });
 mkdirSync(paths.agentMem, { recursive: true });
 
-const server = new McpServer({ name: "sql_memory", version: "0.1.0" });
+const server = new McpServer({ name: "memora", version: "0.1.0" });
 
+registerTool(
+  server,
+  KnowledgeRead.name,
+  KnowledgeRead.description,
+  KnowledgeRead.input,
+  KnowledgeRead.handler,
+);
+registerTool(
+  server,
+  KnowledgeWrite.name,
+  KnowledgeWrite.description,
+  KnowledgeWrite.input,
+  KnowledgeWrite.handler,
+);
 registerTool(
   server,
   MemoryCreate.name,

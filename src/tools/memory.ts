@@ -6,21 +6,13 @@ const DEFAULT_MEMORY_LIMIT = 20;
 
 // ─── memory_create ──────────────────────────────────────────────────────────
 const MemoryCreateInput = z.object({
-  agent: z
-    .string()
-    .min(1)
-    .optional()
-    .describe(
-      "Identifier of the agent storing this memory. Defaults to the AGENT_NAME env var set in .mcp.json; required if AGENT_NAME is empty.",
-    ),
   data: z.string().min(1).describe("The text to remember."),
 });
 
 async function handleMemoryCreate(input: z.infer<typeof MemoryCreateInput>) {
-  const agent = input.agent || config.AGENT_NAME;
-  if (!agent) {
+  if (!config.AGENT_NAME) {
     throw new Error(
-      "agent is required: pass it in the tool call, or set AGENT_NAME in .mcp.json env.",
+      "AGENT_NAME is not set. Set it in the .mcp.json env block (or .env) before writing memories.",
     );
   }
   const statement = database.prepare(`
@@ -28,13 +20,13 @@ async function handleMemoryCreate(input: z.infer<typeof MemoryCreateInput>) {
     values (?, ?)
     returning *
   `);
-  return statement.get(agent, input.data);
+  return statement.get(config.AGENT_NAME, input.data);
 }
 
 export const MemoryCreate = {
   name: "memory_create",
   description:
-    "Store a note in long-term memory. Returns the created memory row.",
+    "Store a new memory under this MCP's AGENT_NAME. Returns the created row.",
   input: MemoryCreateInput,
   handler: handleMemoryCreate,
 };
@@ -44,23 +36,28 @@ const MemorySearchInput = z.object({
   query: z
     .string()
     .min(1)
-    .describe("FTS5 MATCH query, e.g. 'shopify recruiter'."),
+    .describe(
+      "FTS5 MATCH expression. Words match as AND; supports OR, NOT, and quoted phrases.",
+    ),
   agent: z
     .string()
     .optional()
-    .describe("Optionally restrict to memories from a specific agent."),
+    .describe(
+      "Filter to one agent's memories. Defaults to this MCP's AGENT_NAME; pass a different name to read theirs. If AGENT_NAME is unset and this is omitted, returns memories from all agents.",
+    ),
   limit: z
     .number()
     .int()
     .positive()
     .optional()
-    .describe("Max results (default 10)."),
+    .describe("Max results (default 20)."),
 });
 
 async function handleMemorySearch(input: z.infer<typeof MemorySearchInput>) {
-  const limit = input.limit ?? DEFAULT_MEMORY_LIMIT;
+  const agent = input.agent || config.AGENT_NAME;
+  const limit = input.limit || DEFAULT_MEMORY_LIMIT;
 
-  if (input.agent) {
+  if (agent) {
     const statement = database.prepare(`
       select m.*
       from memories_fts f
@@ -70,7 +67,7 @@ async function handleMemorySearch(input: z.infer<typeof MemorySearchInput>) {
       order by rank
       limit ?
     `);
-    return statement.all(input.query, input.agent, limit);
+    return statement.all(input.query, agent, limit);
   }
 
   const statement = database.prepare(`
@@ -87,7 +84,7 @@ async function handleMemorySearch(input: z.infer<typeof MemorySearchInput>) {
 export const MemorySearch = {
   name: "memory_search",
   description:
-    "Full-text search memories ranked by relevance, optionally scoped to one agent. Returns an array of memory rows.",
+    "Full-text search memories ranked by relevance. Returns an array of matching rows.",
   input: MemorySearchInput,
   handler: handleMemorySearch,
 };
@@ -97,19 +94,22 @@ const MemoryListInput = z.object({
   agent: z
     .string()
     .optional()
-    .describe("Optionally restrict to memories from a specific agent."),
+    .describe(
+      "Filter to one agent's memories. Defaults to this MCP's AGENT_NAME; pass a different name to read theirs. If AGENT_NAME is unset and this is omitted, returns memories from all agents.",
+    ),
   limit: z
     .number()
     .int()
     .positive()
     .optional()
-    .describe(`Max results (default ${DEFAULT_MEMORY_LIMIT}).`),
+    .describe("Max results (default 20)."),
 });
 
 async function handleMemoryList(input: z.infer<typeof MemoryListInput>) {
+  const agent = input.agent || config.AGENT_NAME;
   const limit = input.limit || DEFAULT_MEMORY_LIMIT;
 
-  if (input.agent) {
+  if (agent) {
     const statement = database.prepare(`
       select *
       from memories
@@ -117,7 +117,7 @@ async function handleMemoryList(input: z.infer<typeof MemoryListInput>) {
       order by created_at desc
       limit ?
     `);
-    return statement.all(input.agent, limit);
+    return statement.all(agent, limit);
   }
 
   const statement = database.prepare(`
@@ -132,7 +132,7 @@ async function handleMemoryList(input: z.infer<typeof MemoryListInput>) {
 export const MemoryList = {
   name: "memory_list",
   description:
-    "List memories newest-first, optionally scoped to one agent. Returns an array of memory rows.",
+    "List memories newest-first. Returns an array of rows.",
   input: MemoryListInput,
   handler: handleMemoryList,
 };
@@ -154,7 +154,7 @@ async function handleMemoryDelete(input: z.infer<typeof MemoryDeleteInput>) {
 export const MemoryDelete = {
   name: "memory_delete",
   description:
-    "Delete a memory by id. Returns the deleted memory row, or null if no row matched.",
+    "Delete a memory by id. Returns the deleted row, or null if no row matched.",
   input: MemoryDeleteInput,
   handler: handleMemoryDelete,
 };

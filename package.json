@@ -1,8 +1,8 @@
 {
-  "name": "sql_memory",
+  "name": "memora",
   "version": "0.1.0",
   "private": true,
-  "description": "Persistent notebook MCP — SQLite + FTS5. Four tools: remember, recall, list_memories, forget.",
+  "description": "Persistent agent-memory MCP. Episodic notes in SQLite + FTS5; procedural and semantic knowledge in markdown files.",
   "type": "module",
   "main": "dist/server.js",
   "scripts": {
