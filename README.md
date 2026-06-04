@@ -1,86 +1,144 @@
 # memora
 
-Persistent agent-memory MCP. Two storage layers behind one server:
+Persistent agent memory MCP. Two storage layers behind one stdio server:
 
-- **Episodic memory** — timestamped notes in SQLite + FTS5 (what happened, when).
-- **Procedural + semantic knowledge** — markdown files (how to do things, what's true).
+- **Episodic** — timestamped notes in SQLite + FTS5. What happened, when.
+- **Procedural + semantic** — markdown files. How to do things, what's true.
 
-Six tools total. Self-contained: own `package.json`, own `node_modules`, own `dist/`. Any project can register it via `.mcp.json`.
+Wire it into a project's `.mcp.json`, set an `AGENT_NAME`, and any Claude Code (or other stdio-MCP) agent in that project gets six tools for reading and writing durable memory across sessions.
 
-## Tools
+## Tools at a glance
 
-| Tool | Backing | Purpose |
-|---|---|---|
-| `memory_create(agent?, data)` | SQLite | Store an episodic note. Returns the created row. |
-| `memory_search(query, agent?, limit?=10)` | SQLite (FTS5) | Full-text search ranked by relevance. Returns an array of rows. |
-| `memory_list(agent?, limit?=20)` | SQLite | Browse newest-first. Returns an array of rows. |
-| `memory_delete(id)` | SQLite | Delete a note by id. Returns the deleted row, or `null` if not found. |
-| `knowledge_read(type, scope?)` | markdown file | Read `procedural.md` or `semantic.md`, agent- or global-scoped. Returns `{ content }`. |
-| `knowledge_write(type, scope?, content)` | markdown file | Replace the file with new content. Returns `{ ok: true, path }`. |
+| Tool | Use when |
+|---|---|
+| `memory_create(data)` | Recording a timestamped event or observation. |
+| `memory_search(query, agent?, limit?=10)` | Looking up a past event by keyword. FTS5 — words = implicit AND; supports `OR`, `NOT`, `"quoted phrase"`. |
+| `memory_list(agent?, limit?=20)` | Browsing recent activity newest-first. |
+| `memory_delete(id)` | Removing a duplicate or wrong entry. |
+| `knowledge_read(type, scope?)` | Loading procedural rules or semantic facts from markdown. |
+| `knowledge_write(type, scope?, content)` | **Replacing** the procedural or semantic file. Always `knowledge_read` first. |
 
-Where:
-- `type` = `"procedural" | "semantic"` (required)
-- `scope` = `"agent" | "global"` (optional, defaults to `"agent"`)
+`type` = `"procedural" \| "semantic"`. `scope` = `"agent" \| "global"` (default `"agent"`).
 
-## Configuration (via `.mcp.json` env block in the consuming project)
+> The companion skill at [`skill/SKILL.md`](skill/SKILL.md) covers *when* to call which tool, dedup/staleness rules, and the read-before-write workflow. README = wiring. Skill = policy.
+
+## Quick start
+
+Three steps to wire memora into a project.
+
+### 1. Build memora once
+
+```bash
+cd memora
+npm install
+npm run build
+```
+
+Requires Node ≥ 22.14. Produces `dist/server.js` — the stdio entry point.
+
+### 2. Register it in your project's `.mcp.json`
+
+In any sibling project:
 
 ```jsonc
-"memora": {
-  "type": "stdio",
-  "command": "node",
-  "args": ["../memora/dist/server.js"],
-  "env": {
-    "AGENT_NAME": "jobhunt"
+{
+  "mcpServers": {
+    "memora": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["../memora/dist/server.js"],
+      "env": {
+        "AGENT_NAME": "your-agent-name",
+        "AGENT_MEMORA_PATH": "/absolute/path/to/this/project"
+      }
+    }
   }
 }
 ```
 
-`AGENT_NAME` is the only thing you typically need to set. Defaults derive everything else.
+- **`AGENT_NAME`** — set this per project. It scopes episodic rows (the `agent` column) and the agent markdown subdirectory. If unset it defaults to `"default"`, which means every project that forgets to set it will share one memory pool.
+- **`AGENT_MEMORA_PATH`** — optional. When set, the agent's `procedural.md` and `semantic.md` live under `<this path>/<AGENT_NAME>/` instead of inside memora's own `data/`. Useful for keeping each project's notes next to its source.
+- **`args` path** — shown as a sibling-folder relative path. Adjust if memora lives elsewhere.
 
-See `.env.example` for the full list of overrides (`MEMORA_PATH`, `AGENT_MEMORY_PATH`).
+### 3. Verify the connection
 
-## Where the data lives
+From a Claude Code session in that project, call:
 
-By default, all data lives inside the MCP package folder under `data/`:
+```
+knowledge_read({ type: "procedural" })
+```
+
+A fresh install returns `{ ok: true, content: "" }`. Empty content = working, not broken — the file is created on first `knowledge_write`.
+
+## Install the paired skill
+
+The MCP exposes tools; the skill teaches agents *when* to use them. Symlink it once into your user-global skills folder and every project picks it up:
+
+```bash
+ln -s /absolute/path/to/memora/skill ~/.claude/skills/memora
+```
+
+After this, every Claude Code session shows a `memora` skill in its skill list. The skill covers read-before-write, dedup, the agent-vs-global scoping rules, and what **not** to store. See [`skill/SKILL.md`](skill/SKILL.md) for the full guidance.
+
+## Where data lives
+
+By default everything lives inside memora's own `data/`:
 
 ```
 memora/data/
-├── memory.db                 ← episodic SQLite store
+├── memory.db                 ← episodic SQLite store (all agents, filtered by agent column)
 ├── agents/
 │   └── <AGENT_NAME>/
-│       ├── procedural.md
-│       └── semantic.md
+│       ├── procedural.md     ← this agent's how-to rules
+│       └── semantic.md       ← this agent's domain facts
 └── global/
-    ├── procedural.md
-    └── semantic.md
+    ├── procedural.md         ← shared across all agents
+    └── semantic.md           ← shared across all agents
 ```
 
-Set `MEMORA_PATH` to an absolute path to relocate the whole tree elsewhere.
+> `AGENT_MEMORA_PATH` pushes only the `agents/<AGENT_NAME>/` subtree elsewhere — the SQLite database stays inside memora. `MEMORA_PATH` relocates the entire tree.
 
-## Build
+## Daily ops loop
 
-From the MCP folder:
+The intended rhythm for an agent using memora:
+
+1. **Session start** — `knowledge_read("procedural")` + `knowledge_read("semantic")` to absorb operating context.
+2. **Mid-session** — `memory_search` with proper-noun anchors when you need a specific past event; `memory_list` for time-bounded review.
+3. **End of useful work** — `memory_create` for events worth keeping. Promote a recurring lesson by `knowledge_read` → edit → `knowledge_write`.
+
+The full read-before-write / dedup / promotion workflow lives in [`skill/SKILL.md`](skill/SKILL.md).
+
+## Configuration reference
+
+| Variable | Default | When to override |
+|---|---|---|
+| `AGENT_NAME` | `default` | Always — set per project so agents don't share one identity. |
+| `MEMORA_PATH` | `<memora>/data` | Relocating the entire data tree (db + agents + global) outside the repo. |
+| `AGENT_MEMORA_PATH` | (uses `<MEMORA_PATH>/agents/<AGENT_NAME>`) | Keeping agent markdown next to the consumer project's source. |
+
+The full list with defaults is in [`.env.example`](.env.example).
+
+## Troubleshooting
+
+- **Every project sees the same memories.** None set `AGENT_NAME`, so all default to `"default"`. Set distinct values per `.mcp.json`.
+- **`memory_search` returns nothing for a multi-word query.** FTS5 treats space-separated words as implicit AND. Quote phrases (`"exact match"`) or split with `OR`.
+- **System `sqlite3` CLI says `no such module: fts5`.** The macOS-bundled CLI often lacks FTS5. Use the project's bundled `better-sqlite3` via a tiny Node script, or install `sqlite3` from Homebrew with FTS5.
+- **`knowledge_read` returns empty content on first call.** Expected — the markdown file is created on first `knowledge_write`. Empty string is success.
+
+## Develop
 
 ```bash
-npm install      # first time only
-npm run build    # compiles src/ → dist/
+npm install            # first time
+npm run build          # compiles src/ → dist/
+node dist/server.js    # run the stdio server standalone (MCP clients normally spawn this for you)
 ```
 
-## Inspect the SQL data
+Source layout: `src/server.ts` registers tools, `src/tools/{memory,knowledge}.ts` are the handlers, `src/config/config.ts` resolves paths from env.
 
-```bash
-sqlite3 data/memory.db
-sqlite> SELECT * FROM memories ORDER BY created_at DESC LIMIT 10;
-sqlite> SELECT m.* FROM memories_fts f JOIN memories m ON m.id = f.rowid
-        WHERE memories_fts MATCH 'shopify' ORDER BY rank LIMIT 5;
-```
+## Roadmap
 
-(Note: the system `sqlite3` CLI may lack FTS5. Use the bundled `better-sqlite3` if MATCH queries fail.)
+The schema is intentionally minimal so it can grow:
 
-## Future extensions
-
-The schema is intentionally minimal:
-
-- **Semantic vector search**: add a `memories_vec` virtual table via `sqlite-vec`, embed `data` on insert, hybrid-rank with RRF in `memory_search`.
-- **In-place updates**: add `memory_update(id, data?)` — the FTS5 update trigger already handles it.
-- **Atomic knowledge notes**: add a `note_read/note_write` tool for arbitrary `.md` files inside the agent/global folders (Obsidian-vault style) alongside the canonical `procedural.md` + `semantic.md`.
+- **Semantic vector search** — add a `memories_vec` virtual table via `sqlite-vec`, embed `data` on insert, hybrid-rank with RRF inside `memory_search`.
+- **`memory_update(id, data?)`** — FTS5 update triggers are already in place; only the tool is missing.
+- **Note-style markdown files** — `note_read` / `note_write` for arbitrary `.md` files alongside the canonical `procedural.md` + `semantic.md` (Obsidian-vault shape).
