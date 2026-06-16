@@ -28,7 +28,7 @@ Default scope is `agent`. Promote to `global` only when something genuinely appl
 | Tool | Use when |
 |------|----------|
 | `memory_create(data)` | Recording a discrete event with a timestamp: an action taken, an outcome observed, a contact made. |
-| `memory_search(query, agent?, limit?=10)` | Looking up a specific past event by keyword. FTS5 syntax: words = implicit AND, supports `OR`, `NOT`, `"quoted phrase"`. Anchor on proper nouns (company, person, ticket id, date). |
+| `memory_search(query, agent?, limit?=10, sort?)` | Looking up a specific past event by keyword. FTS5 syntax: words = implicit AND, supports `OR`, `NOT`, `"quoted phrase"`. Anchor on proper nouns (company, person, ticket id, date). Default `sort` is `"relevant"` (FTS5 rank); use `"recent"` when you want the most recent matching event — e.g. "last run of watch X" — so denser old logs don't outrank a fresh short one. |
 | `memory_list(agent?, limit?=20)` | Browsing recent activity newest-first. Good for "what happened this week?" — not for keyword lookup. |
 | `memory_delete(id)` | Removing a duplicate, a mistaken entry, or an episodic note that's been promoted into procedural/semantic markdown. |
 | `knowledge_read(type, scope?)` | Once at session start, and again immediately before any `knowledge_write` (read-before-write is mandatory — see below). |
@@ -59,7 +59,7 @@ Default scope is `agent`. Promote to `global` only when something genuinely appl
 ## Recall strategy
 
 1. **Session start:** call `knowledge_read("procedural")` and `knowledge_read("semantic")` once. They're small and frame how to act. Skip if already in context this session.
-2. **Specific historical lookup** ("did we apply to X?", "what did Y say?"): `memory_search` with proper-noun anchors. Don't pre-load search results "just in case" — every recalled token competes with the user's actual message.
+2. **Specific historical lookup** ("did we apply to X?", "what did Y say?"): `memory_search` with proper-noun anchors. Don't pre-load search results "just in case" — every recalled token competes with the user's actual message. For "what's the *most recent* X?" use `sort: "recent"` — relevance-rank can bury fresh entries beneath dense old ones.
 3. **Time-bounded review** ("what did I do this week?"): `memory_list`, not `memory_search`.
 4. **Don't re-read the markdown** mid-session unless you just wrote to it.
 
@@ -90,6 +90,7 @@ Default scope is `agent`. Promote to `global` only when something genuinely appl
 
 - **`knowledge_write` is destructive.** Read first. Every time.
 - **FTS5 ≠ semantic search.** `memory_search` matches keywords, not meaning. Use proper nouns; quote multi-word phrases.
+- **Default search is relevance-ranked, not recency.** Older, denser logs can outrank a newer short match for the same query. When you want "the latest X", pass `sort: "recent"`.
 - **Boolean syntax:** spaces between words mean AND implicitly; use literal `OR`, `NOT`, `"…"`. Don't write SQL-style `AND`.
 - **Agent isolation is by `AGENT_NAME`.** Each project's `.mcp.json` sets its own — episodic notes are filtered by it automatically. Pass an explicit `agent:` argument only to read another agent's memories on purpose.
 - **Stale facts contaminate.** When correcting a fact in markdown, edit the existing line — don't just append the new one and let both sit.

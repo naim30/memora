@@ -12,7 +12,7 @@ Wire it into a project's `.mcp.json`, set an `AGENT_NAME`, and any Claude Code (
 | Tool | Use when |
 |---|---|
 | `memory_create(data)` | Recording a timestamped event or observation. |
-| `memory_search(query, agent?, limit?=10)` | Looking up a past event by keyword. FTS5 — words = implicit AND; supports `OR`, `NOT`, `"quoted phrase"`. |
+| `memory_search(query, agent?, limit?=10, sort?)` | Looking up a past event by keyword. FTS5 — words = implicit AND; supports `OR`, `NOT`, `"quoted phrase"`. Pass `sort: "recent"` to get newest-first matches instead of FTS5 relevance (`sort: "relevant"`, default) — use this when you want the latest matching event (e.g. "last run of watch X"). |
 | `memory_list(agent?, limit?=20)` | Browsing recent activity newest-first. |
 | `memory_delete(id)` | Removing a duplicate or wrong entry. |
 | `knowledge_read(type, scope?)` | Loading procedural rules or semantic facts from markdown. |
@@ -122,6 +122,7 @@ The full list with defaults is in [`.env.example`](.env.example).
 
 - **Every project sees the same memories.** None set `AGENT_NAME`, so all default to `"default"`. Set distinct values per `.mcp.json`.
 - **`memory_search` returns nothing for a multi-word query.** FTS5 treats space-separated words as implicit AND. Quote phrases (`"exact match"`) or split with `OR`.
+- **`memory_search` returns old logs above the newest match.** Default ordering is FTS5 relevance (`sort: "relevant"`), so denser old entries outrank fresher short ones. Pass `sort: "recent"` to order matches newest-first.
 - **System `sqlite3` CLI says `no such module: fts5`.** The macOS-bundled CLI often lacks FTS5. Use the project's bundled `better-sqlite3` via a tiny Node script, or install `sqlite3` from Homebrew with FTS5.
 - **`knowledge_read` returns empty content on first call.** Expected — the markdown file is created on first `knowledge_write`. Empty string is success.
 

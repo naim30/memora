@@ -23,18 +23,15 @@ const basePath = config.MEMORA_PATH
   ? resolve(rootPath, `${config.MEMORA_PATH}/memora`)
   : resolve(rootPath, "data");
 
-const globalMemPath = resolve(basePath, "global");
-
-const agentMemPath = config.AGENT_MEMORA_PATH
+const agentPath = config.AGENT_MEMORA_PATH
   ? resolve(rootPath, `${config.AGENT_MEMORA_PATH}/${config.AGENT_NAME}`)
   : resolve(basePath, `agents/${config.AGENT_NAME}`);
 
-const databasePath = resolve(basePath, `memory.db`);
+const databasePath = resolve(basePath, `memora.db`);
 const databaseSchemaPath = resolve(rootPath, `src/database/schema.sql`);
 
 export const paths = {
-  globalMem: globalMemPath,
-  agentMem: agentMemPath,
   database: databasePath,
   databaseSchema: databaseSchemaPath,
+  agentMem: agentPath,
 };

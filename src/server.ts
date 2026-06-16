@@ -9,13 +9,24 @@ import { registerTool } from "./lib/register-tool.js";
 import {
   KnowledgeRead,
   KnowledgeWrite,
-  MemoryCreate,
-  MemoryDelete,
-  MemoryList,
-  MemorySearch,
+  WorldCreate,
+  WorldGet,
+  WorldUpdate,
+  WorldDelete,
+  WorldSearch,
+  EpisodicCreate,
+  EpisodicGet,
+  EpisodicList,
+  EpisodicDelete,
+  EpisodicSearch,
+  SemanticCreate,
+  SemanticGet,
+  SemanticList,
+  SemanticUpdate,
+  SemanticDelete,
+  SemanticSearch,
 } from "./tools/index.js";
 
-mkdirSync(paths.globalMem, { recursive: true });
 mkdirSync(paths.agentMem, { recursive: true });
 
 const server = new McpServer({ name: "memora", version: "0.1.0" });
@@ -36,31 +47,115 @@ registerTool(
 );
 registerTool(
   server,
-  MemoryCreate.name,
-  MemoryCreate.description,
-  MemoryCreate.input,
-  MemoryCreate.handler,
+  WorldCreate.name,
+  WorldCreate.description,
+  WorldCreate.input,
+  WorldCreate.handler,
 );
 registerTool(
   server,
-  MemorySearch.name,
-  MemorySearch.description,
-  MemorySearch.input,
-  MemorySearch.handler,
+  WorldGet.name,
+  WorldGet.description,
+  WorldGet.input,
+  WorldGet.handler,
 );
 registerTool(
   server,
-  MemoryList.name,
-  MemoryList.description,
-  MemoryList.input,
-  MemoryList.handler,
+  WorldUpdate.name,
+  WorldUpdate.description,
+  WorldUpdate.input,
+  WorldUpdate.handler,
 );
 registerTool(
   server,
-  MemoryDelete.name,
-  MemoryDelete.description,
-  MemoryDelete.input,
-  MemoryDelete.handler,
+  WorldDelete.name,
+  WorldDelete.description,
+  WorldDelete.input,
+  WorldDelete.handler,
+);
+registerTool(
+  server,
+  WorldSearch.name,
+  WorldSearch.description,
+  WorldSearch.input,
+  WorldSearch.handler,
+);
+registerTool(
+  server,
+  EpisodicCreate.name,
+  EpisodicCreate.description,
+  EpisodicCreate.input,
+  EpisodicCreate.handler,
+);
+registerTool(
+  server,
+  EpisodicGet.name,
+  EpisodicGet.description,
+  EpisodicGet.input,
+  EpisodicGet.handler,
+);
+registerTool(
+  server,
+  EpisodicList.name,
+  EpisodicList.description,
+  EpisodicList.input,
+  EpisodicList.handler,
+);
+registerTool(
+  server,
+  EpisodicSearch.name,
+  EpisodicSearch.description,
+  EpisodicSearch.input,
+  EpisodicSearch.handler,
+);
+registerTool(
+  server,
+  EpisodicDelete.name,
+  EpisodicDelete.description,
+  EpisodicDelete.input,
+  EpisodicDelete.handler,
+);
+registerTool(
+  server,
+  SemanticCreate.name,
+  SemanticCreate.description,
+  SemanticCreate.input,
+  SemanticCreate.handler,
+);
+registerTool(
+  server,
+  SemanticGet.name,
+  SemanticGet.description,
+  SemanticGet.input,
+  SemanticGet.handler,
+);
+registerTool(
+  server,
+  SemanticList.name,
+  SemanticList.description,
+  SemanticList.input,
+  SemanticList.handler,
+);
+registerTool(
+  server,
+  SemanticUpdate.name,
+  SemanticUpdate.description,
+  SemanticUpdate.input,
+  SemanticUpdate.handler,
+);
+registerTool(
+  server,
+  SemanticDelete.name,
+  SemanticDelete.description,
+  SemanticDelete.input,
+  SemanticDelete.handler,
+);
+registerTool(
+  server,
+  SemanticSearch.name,
+  SemanticSearch.description,
+  SemanticSearch.input,
+  SemanticSearch.handler,
 );
 
 function shutdown() {
@@ -82,6 +177,6 @@ async function main() {
 
 main().catch((err) => {
   const errMsg = err instanceof Error ? err.stack : String(err);
-  console.log(`Memory server stopped with error: ${errMsg}`);
+  console.log(`Memora server stopped with error: ${errMsg}`);
   process.exit(1);
 });

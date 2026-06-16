@@ -1,7 +1,23 @@
 export { KnowledgeRead, KnowledgeWrite } from "./knowledge.js";
 export {
-  MemoryCreate,
-  MemorySearch,
-  MemoryList,
-  MemoryDelete,
-} from "./memory.js";
+  WorldCreate,
+  WorldGet,
+  WorldUpdate,
+  WorldDelete,
+  WorldSearch,
+} from "./world.js";
+export {
+  EpisodicCreate,
+  EpisodicGet,
+  EpisodicList,
+  EpisodicDelete,
+  EpisodicSearch,
+} from "./episodic.js";
+export {
+  SemanticCreate,
+  SemanticGet,
+  SemanticList,
+  SemanticUpdate,
+  SemanticDelete,
+  SemanticSearch,
+} from "./semantic.js";
