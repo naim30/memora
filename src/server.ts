@@ -1,14 +1,10 @@
 #!/usr/bin/env node
 
-import { mkdirSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { paths } from "./config/config.js";
 import { database } from "./database/db.js";
 import { registerTool } from "./lib/register-tool.js";
 import {
-  KnowledgeRead,
-  KnowledgeWrite,
   WorldCreate,
   WorldGet,
   WorldUpdate,
@@ -27,24 +23,8 @@ import {
   SemanticSearch,
 } from "./tools/index.js";
 
-mkdirSync(paths.agentMem, { recursive: true });
-
 const server = new McpServer({ name: "memora", version: "0.1.0" });
 
-registerTool(
-  server,
-  KnowledgeRead.name,
-  KnowledgeRead.description,
-  KnowledgeRead.input,
-  KnowledgeRead.handler,
-);
-registerTool(
-  server,
-  KnowledgeWrite.name,
-  KnowledgeWrite.description,
-  KnowledgeWrite.input,
-  KnowledgeWrite.handler,
-);
 registerTool(
   server,
   WorldCreate.name,

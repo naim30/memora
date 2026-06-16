@@ -1,4 +1,3 @@
-export { KnowledgeRead, KnowledgeWrite } from "./knowledge.js";
 export {
   WorldCreate,
   WorldGet,

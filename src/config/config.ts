@@ -16,16 +16,11 @@ export const config = cleanEnv(process.env, {
   MEMORA_PATH: str({ default: "" }),
 
   AGENT_NAME: str({ default: "default", devDefault: "default" }),
-  AGENT_MEMORA_PATH: str({ default: "" }),
 });
 
 const basePath = config.MEMORA_PATH
   ? resolve(rootPath, `${config.MEMORA_PATH}/memora`)
   : resolve(rootPath, "data");
-
-const agentPath = config.AGENT_MEMORA_PATH
-  ? resolve(rootPath, `${config.AGENT_MEMORA_PATH}/${config.AGENT_NAME}`)
-  : resolve(basePath, `agents/${config.AGENT_NAME}`);
 
 const databasePath = resolve(basePath, `memora.db`);
 const databaseSchemaPath = resolve(rootPath, `src/database/schema.sql`);
@@ -33,5 +28,4 @@ const databaseSchemaPath = resolve(rootPath, `src/database/schema.sql`);
 export const paths = {
   database: databasePath,
   databaseSchema: databaseSchemaPath,
-  agentMem: agentPath,
 };
