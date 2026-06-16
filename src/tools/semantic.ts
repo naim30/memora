@@ -15,19 +15,19 @@ const SemanticCreateInput = z.object({
     .string()
     .min(1)
     .describe(
-      "Short label for this fact — used for human scanning and as a coarse dedup key. Convention: snake_case, usually a noun or attribute describing what the fact is *about*. Examples spanning different agent kinds: 'preferred_language', 'default_timezone', 'project_root', 'oncall_rotation', 'persona_voice', 'allowed_repos'.",
+      "Short label naming the SUBJECT or topic of this fact — used for human scanning and as a coarse dedup key. Convention: snake_case noun phrase. Examples spanning different agent kinds: 'preferred_language', 'default_timezone', 'project_root', 'oncall_rotation', 'persona_voice', 'allowed_repos'. NOT indexed by FTS5 — this is a label, not a searchable phrase.",
     ),
   data: z
     .string()
     .min(1)
     .describe(
-      "The fact itself, in natural language — a self-contained statement that another agent (or future-you) could act on without further context. State it as durable state, not as an event. Example: 'The user prefers concise bulleted summaries over long prose and expects markdown formatting by default.'",
+      "The fact itself as a self-contained DECLARATIVE statement. ONE sentence (target 100-400 chars; soft cap ~2000 — compress if larger, see SKILL.md). Third-person, present-tense, named subject (no bare 'user' / 'they'). State durable state, NOT events. If the fact derives from a logged episodic event, embed the source inline at the end as `[episodic id: <int>]` so a future agent can follow the link via episodic_get. Example: 'The user prefers concise bulleted summaries over long prose and expects markdown formatting by default [episodic id: 47].' If no episodic source exists (system prompt, user assertion, external knowledge), omit the bracket and set metadata.origin instead.",
     ),
   metadata: z
     .record(z.unknown())
     .optional()
     .describe(
-      "Optional key-value object for structured tags that survive into search filters and any downstream promotion pass. Common shape: a source/origin (which episodic event or interaction this was derived from), a confidence level, an expiry, free-form tags. Example: { source: 'episodic_412', confidence: 'high', tags: ['preferences', 'tooling'] }. Stored as JSON; returned already parsed.",
+      "Optional key-value object for structured tags. Conventional keys: tags (list), confidence ('high'|'medium'|'low' or 0-1), origin (set when no episodic source bracket — 'system_prompt' / 'user_assertion' / 'external_kb' / 'inference'), valid_from / valid_until (ISO date for world-time validity), superseded_by (id of replacing row). Example: { tags: ['preferences','tooling'], confidence: 'high' }. NOT FTS5-indexed — bake searchable phrases into `data`. Stored as JSON; returned already parsed.",
     ),
 });
 
@@ -57,7 +57,7 @@ async function handleSemanticCreate(
 export const SemanticCreate = {
   name: "semantic_create",
   description:
-    "Store a stable per-agent fact in semantic memory — a piece of state the agent should treat as durably true unless or until contradicted (preferences, profiles, learned constants, configuration choices, taxonomy decisions). Semantic answers 'what is known,' distinct from episodic_create's 'what happened' and world_create's 'what is known across all agents.' Use episodic_create instead for one-off events or timestamped observations even if they sound fact-like ('the user said X today'); use world_create when the fact should be visible to every agent on the server; use semantic_update (not a fresh semantic_create) when an existing fact is being refined or corrected. Returns the created row (id, agent, name, data, metadata, created_at, updated_at), automatically scoped to this MCP's AGENT_NAME.",
+    "Store a stable per-agent fact in semantic memory — durable state the agent should treat as true unless or until contradicted (preferences, profiles, learned constants, configuration choices, taxonomy decisions). Semantic answers 'what is known'. Use episodic_create instead for one-off events even if they sound fact-like ('the user said X today'); use world_create when the fact should be visible to every agent on the server; use semantic_update (not a fresh create) when a row for this fact already exists. ALWAYS semantic_search the subject FIRST to avoid duplicating an existing row — duplicates poison future retrieval. Embed provenance inline in `data` as `[episodic id: <int>]` when the fact derives from a logged episodic event. Data is one declarative present-tense sentence with named subject; soft cap ~2000 chars (skill guidance). Returns the created row (id, agent, name, data, metadata, created_at, updated_at), automatically scoped to this MCP's AGENT_NAME.",
   input: SemanticCreateInput,
   handler: handleSemanticCreate,
 };
@@ -85,7 +85,7 @@ async function handleSemanticGet(input: z.infer<typeof SemanticGetInput>) {
 export const SemanticGet = {
   name: "semantic_get",
   description:
-    "Fetch a single semantic fact by id. Use after semantic_search or semantic_list returns a candidate worth examining in detail, to re-read a row you just created or updated, or to fetch the current value before calling semantic_update so you can preserve unchanged metadata keys. Returns the row with parsed metadata, or null if no row matched.",
+    "Fetch a single semantic fact by id. Use after semantic_search or semantic_list returns a candidate worth examining in detail, to re-read a row you just created or updated, or to fetch the current value before calling semantic_update so you can preserve unchanged metadata keys (metadata REPLACES on update) AND the existing inline `[episodic id: <int>]` provenance brackets in `data` (which must be preserved + appended-to on update). Returns the row with parsed metadata, or null if no row matched.",
   input: SemanticGetInput,
   handler: handleSemanticGet,
 };
@@ -135,7 +135,7 @@ async function handleSemanticList(input: z.infer<typeof SemanticListInput>) {
 export const SemanticList = {
   name: "semantic_list",
   description:
-    "List semantic facts newest-first across an agent's store, with no keyword filter. Use to scan what's known about a given agent — profile, preferences, learned constants — or for a boot-time grounding pass before deciding what to do; reach for semantic_search instead when you have keywords or a topic in mind. Defaults to this MCP's AGENT_NAME; pass an explicit `agent` to read another agent's store. Returns rows with parsed metadata.",
+    "List semantic facts newest-first across an agent's store, with no keyword filter. Use to scan what's known about a given agent — profile, preferences, learned constants — or for a boot-time grounding pass; reach for semantic_search instead when you have keywords or a topic in mind. Defaults to this MCP's AGENT_NAME; pass an explicit `agent` to read another agent's store. Returns rows with parsed metadata.",
   input: SemanticListInput,
   handler: handleSemanticList,
 };
@@ -161,13 +161,13 @@ const SemanticUpdateInput = z.object({
     .min(1)
     .optional()
     .describe(
-      "New data (optional). Same conventions as semantic_create.data — a self-contained statement of durable state. Omit to leave the existing data unchanged.",
+      "New data (optional). Same conventions as semantic_create.data — one declarative present-tense sentence, soft cap ~2000 chars. When the update was prompted by a fresh observation, PRESERVE existing `[episodic id: <int>]` brackets and APPEND new ones (the audit trail accumulates). semantic_get the row first if you don't have the prior data text. Example: existing 'X prefers Y [episodic id: 47].' becomes 'X prefers Y [episodic id: 47][episodic id: 89].'. Omit to leave existing data unchanged.",
     ),
   metadata: z
     .record(z.unknown())
     .optional()
     .describe(
-      "Replacement metadata object (optional). Note: this REPLACES the metadata entirely; it does NOT merge with the existing object — if you want to preserve some existing keys, semantic_get the row first and pass the merged result. Omit to leave metadata unchanged.",
+      "Replacement metadata object (optional). REPLACES the metadata entirely; it does NOT merge — if you want to preserve some existing keys, semantic_get the row first and pass the merged result. Omit to leave metadata unchanged.",
     ),
 });
 
@@ -212,7 +212,7 @@ async function handleSemanticUpdate(
 export const SemanticUpdate = {
   name: "semantic_update",
   description:
-    "Update a semantic fact in place — mutate name, data, and/or metadata of an existing row and bump updated_at. Use whenever a fact has been refined, corrected, or contradicted; semantic facts represent durable per-agent state, so revise in place rather than deleting and re-creating (which loses the row's id and continuity for any external refs). Unlike episodic (append-only events), semantic and world are both mutable — reach for update over create when a row genuinely already exists for this fact. The FTS5 mirror refreshes via trigger. You must provide at least one of name, data, or metadata. Returns the updated row, or null if no row matched.",
+    "Update a semantic fact in place — mutate name, data, and/or metadata of an existing row and bump updated_at. Use whenever a fact has been refined, corrected, or contradicted; semantic is mutable in place — revise rather than delete+recreate (which would lose the row id and any external references). Unlike episodic (append-only), semantic and world are both mutable. Two contract behaviors to remember: (1) metadata REPLACES — semantic_get first if you need to preserve other keys; (2) when the update is prompted by a fresh episodic event, the new `data` text must PRESERVE existing `[episodic id: <int>]` brackets and APPEND a new one — the audit trail accumulates inside `data`. The FTS5 mirror refreshes via trigger. Provide at least one of name / data / metadata. Returns the updated row, or null if no row matched.",
   input: SemanticUpdateInput,
   handler: handleSemanticUpdate,
 };
@@ -242,7 +242,7 @@ async function handleSemanticDelete(
 export const SemanticDelete = {
   name: "semantic_delete",
   description:
-    "Delete a single semantic fact by id. Use only when a fact no longer applies at all and should be fully removed — when a fact has merely changed or been refined, prefer semantic_update for in-place revision; when it's been promoted to world_* (shared across all agents), delete here after the world row is in place. The FTS5 mirror is kept in sync via trigger. Returns the deleted row, or null if no row matched.",
+    "Delete a single semantic fact by id. Use only when a fact no longer applies AT ALL — when a fact has merely changed or been refined, prefer semantic_update for in-place revision (which preserves the row id, the audit trail in `data` brackets, and any external references); when the fact has been promoted to world_*, delete here only AFTER the world row is in place. The FTS5 mirror is kept in sync via trigger. Returns the deleted row, or null if no row matched.",
   input: SemanticDeleteInput,
   handler: handleSemanticDelete,
 };
@@ -253,7 +253,7 @@ const SemanticSearchInput = z.object({
     .string()
     .min(1)
     .describe(
-      'FTS5 MATCH expression evaluated against the `data` column. Words match as AND implicitly; use uppercase OR, NOT, or "quoted phrases" for finer control. Avoid bare `=` (FTS5 rejects it) and bare ISO date fragments like 2026-06-16 (parsed as column references — wrap them in quotes). Example: \'preferred OR preferences\'.',
+      'FTS5 MATCH expression evaluated against the `data` column ONLY — `name` and `metadata` are NOT indexed and NOT searchable. Words match as AND implicitly; use uppercase OR, NOT, or "quoted phrases" for finer control. Avoid bare `=` (FTS5 rejects it) and bare ISO date fragments like 2026-06-16 (parsed as column references — wrap them in quotes). No stemming. Example: \'preferred OR preferences\'. To reverse-lookup which semantic rows cite a given episodic event, use a quoted phrase: \'"episodic id: 47"\'.',
     ),
   agent: z
     .string()
@@ -312,7 +312,7 @@ async function handleSemanticSearch(
 export const SemanticSearch = {
   name: "semantic_search",
   description:
-    "Full-text search semantic facts (durable per-agent state) via SQLite FTS5 / BM25. Reach for this when looking up what is *known* — profile attributes, preferences, learned constants, taxonomy decisions; use episodic_search for what *happened* (timestamped events) and world_search for facts shared across all agents. Default sort is FTS5 relevance — switch to sort='recent' when you want the most recently recorded matching fact and a denser old entry would otherwise outrank a fresher short one. Returns matching rows with parsed metadata, ordered by the chosen ranking.",
+    "Full-text search semantic facts (durable per-agent state) via SQLite FTS5 / BM25. The `data` column is the ONLY indexed field — `name` and `metadata` are not searchable; phrase data at write time the way a future agent would search for it. Reach for this when looking up what is *known* — profile attributes, preferences, learned constants, taxonomy decisions. ALWAYS call this before semantic_create to avoid duplicating a row; if a near-match exists, use semantic_update instead. Inline `[episodic id: <int>]` provenance brackets in `data` are searchable as quoted phrases (e.g. '\"episodic id: 47\"') for reverse-lookup. Default sort is FTS5 relevance; switch to sort='recent' for the freshest match. Returns matching rows with parsed metadata.",
   input: SemanticSearchInput,
   handler: handleSemanticSearch,
 };

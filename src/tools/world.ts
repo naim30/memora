@@ -14,19 +14,19 @@ const WorldCreateInput = z.object({
     .string()
     .min(1)
     .describe(
-      "Short label for this world fact — used for human scanning and as a coarse dedup key. Convention: snake_case noun phrase describing the fact's subject. Examples spanning different agent kinds: 'company_holidays_2026', 'shared_glossary', 'rate_limit_policy', 'canonical_team_roster', 'deployment_window_utc'.",
+      "Short label naming the SUBJECT of this shared fact — used for human scanning and as a coarse dedup key. Convention: snake_case noun phrase. Examples spanning different agent kinds: 'company_holidays_2026', 'shared_glossary', 'rate_limit_policy', 'canonical_team_roster', 'deployment_window_utc'. NOT indexed by FTS5 — this is a label, not a searchable phrase.",
     ),
   data: z
     .string()
     .min(1)
     .describe(
-      "The shared fact itself, in natural language — a self-contained statement that ANY agent on the server should be able to read and act on. State agent-agnostic durable truths, not per-agent state or one-off events. Example: 'The org's preferred contact channels in order are: email (primary), chat (urgent), phone (emergencies only) — agents should respect this hierarchy when initiating outreach.'",
+      "The shared fact itself as a self-contained DECLARATIVE statement that ANY agent on the server can read and act on. ONE sentence (target 100-500 chars; soft cap ~2000 — compress in place if larger, see SKILL.md). Third-person, present-tense, NO 'I/you/the agent' — name actors explicitly so another agent can act on it. If the fact derives from logged episodic events, embed source(s) inline as `[episodic id: <agent_name>/<int>]` — the <agent_name>/ prefix is REQUIRED because episodic ids are not globally unique across agents. Example: 'Public API rate limit is 100 req/min per IP; bypass requires written sign-off from oncall [episodic id: ops_agent/102][episodic id: support_bot/47].' If no episodic source exists, omit the bracket and set metadata.origin instead.",
     ),
   metadata: z
     .record(z.unknown())
     .optional()
     .describe(
-      "Optional key-value object for structured tags. Common shape: an origin (which agent first asserted this), a confidence level, an expiry, free-form tags. Example: { origin: 'oncall_bot', confidence: 'authoritative', tags: ['policy', 'deploys'] }. Stored as JSON; returned already parsed.",
+      "Optional key-value object for structured tags. Conventional keys: tags (list), confidence ('high'|'medium'|'low' or 0-1), origin (when no episodic source bracket — 'system_prompt' / 'external_kb' / etc.), valid_from / valid_until (ISO date for world-time validity, distinct from system created_at/updated_at). Example: { tags: ['policy','deploys'], confidence: 'authoritative' }. NOT FTS5-indexed — bake searchable phrases into `data`. Stored as JSON; returned already parsed.",
     ),
 });
 
@@ -44,7 +44,7 @@ async function handleWorldCreate(input: z.infer<typeof WorldCreateInput>) {
 export const WorldCreate = {
   name: "world_create",
   description:
-    "Store a new fact in world memory — a piece of knowledge that should be visible to and trusted by *all* agents on this server, not just the writer. World holds canonical truths and cross-agent context: shared taxonomies, system-wide constants, organizational facts, integration metadata. Use episodic_create for one-off per-agent events, semantic_create for per-agent state, and world_create only when the fact is genuinely shared across the agent population. Returns the created row (id, name, data, metadata, created_at, updated_at); world rows are NOT scoped to AGENT_NAME — they are shared across the whole server.",
+    "Store a new fact in world memory — knowledge visible to and trusted by ALL agents on this server, not just the writer. World holds canonical truths and cross-agent context: shared taxonomies, system-wide constants, organizational facts, integration metadata. Use episodic_create for one-off per-agent events, semantic_create for per-agent state, and world_create only when the fact is genuinely shared across the agent population. ALWAYS world_search first to avoid duplicating a shared fact; if a near-match exists, use world_update to merge in place. World rows are NOT scoped to AGENT_NAME — every agent reads them. Embed provenance inline in `data` as `[episodic id: <agent_name>/<int>]` when the fact derives from logged episodic events — the <agent_name>/ prefix is REQUIRED because episodic ids are not globally unique across agents. Data soft cap ~2000 chars (skill guidance — world never splits; merge in place). Returns the created row (id, name, data, metadata, created_at, updated_at).",
   input: WorldCreateInput,
   handler: handleWorldCreate,
 };
@@ -72,7 +72,7 @@ async function handleWorldGet(input: z.infer<typeof WorldGetInput>) {
 export const WorldGet = {
   name: "world_get",
   description:
-    "Fetch a single world fact by id. Use after world_search returns a candidate worth examining in detail, or to re-read a row you just created or updated. Returns the row with parsed metadata, or null if no row matched.",
+    "Fetch a single world fact by id. Use after world_search returns a candidate worth examining, to re-read a row you just created or updated, or to fetch the current value before calling world_update so you can preserve unchanged metadata keys (metadata REPLACES on update) AND the existing inline `[episodic id: <agent_name>/<int>]` provenance brackets in `data` (which must be preserved + appended-to on update). Returns the row with parsed metadata, or null if no row matched.",
   input: WorldGetInput,
   handler: handleWorldGet,
 };
@@ -98,13 +98,13 @@ const WorldUpdateInput = z.object({
     .min(1)
     .optional()
     .describe(
-      "New data (optional). Same conventions as world_create.data — a self-contained statement any agent on the server could read and act on. Omit to leave the existing data unchanged.",
+      "New data (optional). Same conventions as world_create.data — agent-agnostic declarative statement, soft cap ~2000 chars. World facts merge in place: when revising, world_get the current data, summarize-merge the new content with existing content, PRESERVE existing `[episodic id: <agent_name>/<int>]` brackets and APPEND new ones. Example: existing 'X is Y [episodic id: a/47].' becomes 'X is Y; also Z [episodic id: a/47][episodic id: b/89].'. Omit to leave existing data unchanged.",
     ),
   metadata: z
     .record(z.unknown())
     .optional()
     .describe(
-      "Replacement metadata object (optional). Note: this REPLACES the metadata entirely; it does NOT merge with the existing object — if you want to preserve some existing keys, world_get the row first and pass the merged result. Omit to leave metadata unchanged.",
+      "Replacement metadata object (optional). REPLACES the metadata entirely; it does NOT merge — if you want to preserve some existing keys, world_get the row first and pass the merged result. Omit to leave metadata unchanged.",
     ),
 });
 
@@ -147,7 +147,7 @@ async function handleWorldUpdate(input: z.infer<typeof WorldUpdateInput>) {
 export const WorldUpdate = {
   name: "world_update",
   description:
-    "Update a world fact in place — mutate name, data, and/or metadata of an existing row and bump updated_at. World is the singular source of truth across all agents (NOT an append stream like episodic), so prefer updating a stale or contradicted fact in place over creating a new row; the FTS5 mirror refreshes via trigger. You must provide at least one of name, data, or metadata. Returns the updated row, or null if no row matched.",
+    "Update a world fact in place — mutate name, data, and/or metadata of an existing row and bump updated_at. World is the singular source of truth across all agents (NOT an append stream like episodic) — mutate rather than create a parallel row, and NEVER split when oversized; instead world_get the current data, summarize-merge new + existing under the size cap, and write back. Two contract behaviors to remember: (1) metadata REPLACES — world_get first if you need to preserve other keys; (2) when the update is prompted by a fresh episodic event, the new `data` text must PRESERVE existing `[episodic id: <agent_name>/<int>]` brackets and APPEND new ones — the cross-agent audit trail accumulates inside `data`. The FTS5 mirror refreshes via trigger. Provide at least one of name / data / metadata. Returns the updated row, or null if no row matched.",
   input: WorldUpdateInput,
   handler: handleWorldUpdate,
 };
@@ -175,7 +175,7 @@ async function handleWorldDelete(input: z.infer<typeof WorldDeleteInput>) {
 export const WorldDelete = {
   name: "world_delete",
   description:
-    "Delete a single world fact by id. Use when a fact has been retracted across the system, was wrong, or has been consolidated into a different world row during compaction. The FTS5 mirror is kept in sync via trigger. Returns the deleted row, or null if no row matched. World deletions affect every agent on the server — apply more caution here than in episodic or semantic, and prefer world_update for in-place corrections.",
+    "Delete a single world fact by id. Use when a fact has been retracted across the system, was wrong, or has been consolidated into a different world row during compaction. The FTS5 mirror is kept in sync via trigger. Returns the deleted row, or null if no row matched. World deletions affect every agent on the server — apply more caution here than in episodic / semantic; prefer world_update for in-place corrections (which preserves the audit trail in `data` brackets).",
   input: WorldDeleteInput,
   handler: handleWorldDelete,
 };
@@ -186,7 +186,7 @@ const WorldSearchInput = z.object({
     .string()
     .min(1)
     .describe(
-      'FTS5 MATCH expression evaluated against the `data` column. Words match as AND implicitly; use uppercase OR, NOT, or "quoted phrases" for finer control. Avoid bare `=` (FTS5 rejects it) and bare ISO date fragments like 2026-06-16 (parsed as column references — wrap them in quotes). Example: \'"deployment window" OR "release freeze"\'.',
+      'FTS5 MATCH expression evaluated against the `data` column ONLY — `name` and `metadata` are NOT indexed and NOT searchable. Words match as AND implicitly; use uppercase OR, NOT, or "quoted phrases" for finer control. Avoid bare `=` (FTS5 rejects it) and bare ISO date fragments like 2026-06-16 (parsed as column references — wrap them in quotes). No stemming. Example: \'"deployment window" OR "release freeze"\'. To reverse-lookup which world rows cite a given episodic event, use a quoted phrase (FTS5 tokenizer drops the slash — use a space): \'"episodic id: ops_agent 102"\'.',
     ),
   limit: z
     .number()
@@ -223,7 +223,7 @@ async function handleWorldSearch(input: z.infer<typeof WorldSearchInput>) {
 export const WorldSearch = {
   name: "world_search",
   description:
-    "Full-text search world memory (cross-agent shared facts) via SQLite FTS5 / BM25. Reach for this when looking up canonical truths the whole system should know — shared taxonomies, system constants, organizational facts; use semantic_search for per-agent state and episodic_search for timestamped events. Default sort is FTS5 relevance — switch to sort='recent' when you want the most recently updated matching fact (world sorts by updated_at, not created_at, because world rows mutate in place). Returns matching rows with parsed metadata.",
+    "Full-text search world memory (cross-agent shared facts) via SQLite FTS5 / BM25. The `data` column is the ONLY indexed field — `name` and `metadata` are not searchable. Reach for this when looking up canonical truths the whole system should know — shared taxonomies, system constants, organizational facts. ALWAYS call this before world_create to avoid duplicating a shared fact; if a near-match exists, use world_update to merge in place. Inline `[episodic id: <agent_name>/<int>]` provenance brackets in `data` are searchable as quoted phrases for reverse-lookup. Default sort is FTS5 relevance; switch to sort='recent' for the freshest update (world sorts by updated_at, not created_at). Returns matching rows with parsed metadata.",
   input: WorldSearchInput,
   handler: handleWorldSearch,
 };
