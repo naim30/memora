@@ -1,97 +1,69 @@
 ---
 name: memora
-description: Persist and recall agent memory through the Memora MCP — store events as episodic notes, evolve procedural rules and semantic facts in markdown, and search past sessions. Use when the user asks to remember, recall, save, log, look up history, or check what was learned previously; at the start of any session that has memora tools available so prior context can be loaded; or when you notice a recurring pattern worth promoting to durable knowledge.
+description: Use when the user asks to remember, recall, save, log, look up prior activity, store a stable fact, update something that changed, or check what's known across agents — and proactively at the start of a session or after meaningful work concludes. Memora is a persistent agent-memory MCP exposing three CoALA-aligned tiers (episodic per-agent events, semantic per-agent facts, world cross-agent shared facts) via 16 tools. General-purpose — applies to any agent family: coding, research, customer support, devops, scheduling, persona, or otherwise.
 ---
 
 # Memora
 
-Persistent agent memory across sessions via the Memora MCP server. Two storage layers, six tools, one identity per project (set by `AGENT_NAME`).
+Persistent agent memory across sessions via the Memora MCP. Three SQL + FTS5 tiers, one embedded file, one identity per consumer (set by `AGENT_NAME` in the project's `.mcp.json`).
 
-## When to Use
+Memora is general-purpose — the same tools serve any agent family. Nothing below is domain-specific.
 
-Whenever this project's MCP config registers a `memora` server (you'll see `memory_create`, `memory_search`, `memory_list`, `memory_delete`, `knowledge_read`, `knowledge_write` in the tool list). At session start, read the agent's procedural + semantic markdown to absorb its operating frame. Mid-session, search history before answering questions about prior activity. When useful work concludes, capture what's worth keeping.
+## When to call memora
 
-## Memory layers
+- **Session start (optional grounding):** if persisted state matters for the task, call `semantic_list` to ground in the agent's preferences/profile/learned constants.
+- **Mid-session lookup:** before answering anything about prior activity, `*_search` the right tier.
+- **End of useful work:** capture events to episodic, stable facts to semantic, cross-agent truths to world.
+- **On contradiction:** update the stale fact in place via `semantic_update` / `world_update` — never accumulate parallel rows.
 
-Two storage types × two scopes:
+## The three tiers
 
-|                                       | **agent** scope (this `AGENT_NAME`) | **global** scope (shared across agents) |
-|---------------------------------------|-------------------------------------|------------------------------------------|
-| **Episodic** (SQLite + FTS5, timestamped) | `memory_create / memory_search / memory_list / memory_delete` — events, observations, outcomes | same store; pass `agent: "<name>"` to read another agent's notes |
-| **Procedural** (markdown file)        | `knowledge_read("procedural")` / `knowledge_write("procedural")` — replayable how-to rules for this agent | `..., scope: "global"` — universal procedures every agent should follow |
-| **Semantic** (markdown file)          | `knowledge_read("semantic")` / `knowledge_write("semantic")` — facts about this agent's domain | `..., scope: "global"` — facts every agent should know |
+| Tier | Role | Scope | Mutation |
+|---|---|---|---|
+| **episodic** | "what happened" — timestamped per-agent observations | per-agent | append-only (no `_update`) |
+| **semantic** | "what is known" — durable per-agent state | per-agent | mutable in place |
+| **world** | "what is known across all agents" — shared facts | server-wide | mutable in place |
 
-Default scope is `agent`. Promote to `global` only when something genuinely applies to every agent.
+Procedural memory (skills / system prompts) lives in the agent's prompt — not in memora.
 
-## Tools overview
+## The 16 tools
 
-| Tool | Use when |
-|------|----------|
-| `memory_create(data)` | Recording a discrete event with a timestamp: an action taken, an outcome observed, a contact made. |
-| `memory_search(query, agent?, limit?=10, sort?)` | Looking up a specific past event by keyword. FTS5 syntax: words = implicit AND, supports `OR`, `NOT`, `"quoted phrase"`. Anchor on proper nouns (company, person, ticket id, date). Default `sort` is `"relevant"` (FTS5 rank); use `"recent"` when you want the most recent matching event — e.g. "last run of watch X" — so denser old logs don't outrank a fresh short one. |
-| `memory_list(agent?, limit?=20)` | Browsing recent activity newest-first. Good for "what happened this week?" — not for keyword lookup. |
-| `memory_delete(id)` | Removing a duplicate, a mistaken entry, or an episodic note that's been promoted into procedural/semantic markdown. |
-| `knowledge_read(type, scope?)` | Once at session start, and again immediately before any `knowledge_write` (read-before-write is mandatory — see below). |
-| `knowledge_write(type, scope?, content)` | Adding or updating a durable rule or fact. **Replaces the entire file** — always read, edit, then write the merged result. |
+| Family | Tools |
+|---|---|
+| `episodic_*` | `create(name, data, metadata?)`, `get(id)`, `list(agent?, limit?)`, `search(query, agent?, limit?, sort?)`, `delete(id)` |
+| `semantic_*` | `create(name, data, metadata?)`, `get(id)`, `list(agent?, limit?)`, `update(id, name?, data?, metadata?)`, `delete(id)`, `search(query, agent?, limit?, sort?)` |
+| `world_*` | `create(name, data, metadata?)`, `get(id)`, `update(id, name?, data?, metadata?)`, `delete(id)`, `search(query, limit?, sort?)` |
 
-## What goes where
+Every row returns: `{id, agent?, name, data, metadata, created_at, updated_at}`. Metadata is parsed JSON.
 
-**Episodic (`memory_create`)** — timestamped events that won't repeat:
-- "Applied to Stripe Staff PM via Greenhouse — 2026-06-02."
-- "Phone screen with Alex (Linear recruiter); pushed back on comp, said £160k base ceiling."
-- "Datadog interviewer feedback: 'too theoretical on systems design'."
+## Five hard rules
 
-**Procedural (`knowledge_write("procedural")`)** — replayable rules that change future behavior:
-- "When applying via Greenhouse, upload the PDF resume; `.docx` parses badly."
-- "Send recruiter follow-ups Tue/Wed 10am local; skip Friday."
-- "Before logging an application, `memory_search` the company name to avoid duplicates."
+1. **FTS5 only indexes `data`.** `name` and `metadata` are NOT searchable. Bake the searchable phrase into `data`.
+2. **Always search the right tier before writing.** Dedup is your job, not memora's.
+3. **Tier rules are absolute.** Events → episodic, per-agent state → semantic, cross-agent truths → world. Putting a fact in the wrong tier corrupts retrieval.
+4. **Store distilled signal, not transcripts.** One self-contained sentence per row, third-person, named subjects.
+5. **Provenance lives inline in `data` as `[episodic id: <int>]` brackets** (`<agent_name>/<int>` in world). Preserve prior brackets on update; append new ones.
 
-**Semantic (`knowledge_write("semantic")`)** — stable facts about the domain:
-- "Targets Staff/Principal PM. Comp floor £140k base. Remote-UK or hybrid-London only."
-- "Strongest narrative: rebuilt billing at Series-B fintech."
-- "Lever auto-rejects when 'years of experience' < posted minimum, even by one."
+## Deep-dive references — load on demand
 
-**Promote to `global` scope only when:**
-- The fact identifies the user universally (legal name, canonical contact email).
-- The rule is policy-level for every agent ("never push to main without confirmation").
-- The reference data many future agents will query (shared API quirks, shared vocabulary).
+Load the relevant file before acting when the situation demands more detail than this entry covers:
 
-## Recall strategy
+- **Picking the right tier** → [references/picking-the-tier.md](references/picking-the-tier.md)
+- **How to write `data`/`name`/`metadata` per tier** → [references/memory-structure.md](references/memory-structure.md)
+- **Size guideline + compression strategy** → [references/compression.md](references/compression.md)
+- **Provenance via inline brackets** → [references/provenance.md](references/provenance.md)
+- **FTS5 search, dedup, reverse-lookup** → [references/search-and-fts5.md](references/search-and-fts5.md)
+- **Anti-patterns — what NOT to do** → [references/anti-patterns.md](references/anti-patterns.md)
+- **Worked examples per agent kind** → [references/examples.md](references/examples.md)
 
-1. **Session start:** call `knowledge_read("procedural")` and `knowledge_read("semantic")` once. They're small and frame how to act. Skip if already in context this session.
-2. **Specific historical lookup** ("did we apply to X?", "what did Y say?"): `memory_search` with proper-noun anchors. Don't pre-load search results "just in case" — every recalled token competes with the user's actual message. For "what's the *most recent* X?" use `sort: "recent"` — relevance-rank can bury fresh entries beneath dense old ones.
-3. **Time-bounded review** ("what did I do this week?"): `memory_list`, not `memory_search`.
-4. **Don't re-read the markdown** mid-session unless you just wrote to it.
+## Scoping & identity
 
-## Write workflow
+`AGENT_NAME` (from the project's `.mcp.json` env block) scopes episodic + semantic writes/reads. World ignores `AGENT_NAME`. `AGENT_NAME` is frozen at module import — restart the server to change it.
 
-**Before `memory_create`:**
-1. `memory_search` for the key noun (company, person, ticket id). If a near-duplicate from the same day exists, skip.
-2. Confirm it's an observation or outcome — not a plan step, not a tool-result echo, not transcript copy. Store the *derived insight*, not the raw exchange.
-3. Record provenance inline when it isn't first-person: `"recruiter said ..."`, `"inferred from ..."`.
+## What memora is NOT for
 
-**Before `knowledge_write`:**
-1. **Always `knowledge_read` first.** The write is a full-file replace — write blind and prior knowledge is gone.
-2. Edit the returned string, then write the merged result.
-3. If you're contradicting an earlier line, say so inline: `"Previously thought X; correcting to Y as of YYYY-MM-DD."`
-4. Skip the write entirely if the change is trivial or duplicative.
-
-**Promotion pattern:** when 3+ episodic notes carry the same lesson (e.g., five "Greenhouse rejected .docx" entries), promote the lesson into `procedural.md` and `memory_delete` the redundant episodic rows.
-
-## Never write to memory
-
-- Secrets, API keys, credentials, full PII (SSN, full bank numbers).
-- The user's literal last message — store derived insight, not transcript.
-- Speculation or predictions ("they'll probably reply Monday"). Only observed facts.
-- Transient tool output (scraped HTML, captcha state, current page contents).
-- Anything already in the system prompt or in the procedural/semantic files — duplication causes drift between sources.
-
-## Common pitfalls
-
-- **`knowledge_write` is destructive.** Read first. Every time.
-- **FTS5 ≠ semantic search.** `memory_search` matches keywords, not meaning. Use proper nouns; quote multi-word phrases.
-- **Default search is relevance-ranked, not recency.** Older, denser logs can outrank a newer short match for the same query. When you want "the latest X", pass `sort: "recent"`.
-- **Boolean syntax:** spaces between words mean AND implicitly; use literal `OR`, `NOT`, `"…"`. Don't write SQL-style `AND`.
-- **Agent isolation is by `AGENT_NAME`.** Each project's `.mcp.json` sets its own — episodic notes are filtered by it automatically. Pass an explicit `agent:` argument only to read another agent's memories on purpose.
-- **Stale facts contaminate.** When correcting a fact in markdown, edit the existing line — don't just append the new one and let both sit.
-- **No `memory_update` tool exists.** To revise an episodic note, `memory_create` the corrected version (with provenance) and `memory_delete` the wrong one.
+- Working memory / prompt scratchpad
+- Transient session state (current draft, current scroll)
+- Bulk logging / observability
+- Document storage (use a summary + URI in memora; store the doc elsewhere)
+- Secrets, credentials, full PII
